@@ -15,6 +15,29 @@ Date validated: **2026-04-15**
 - For Kubernetes user-namespace version requirements, refer to the
   [official documentation](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/).
 
+### Supported backends
+
+The kernel can only idmap an overlay whose lower filesystem advertises
+`FS_ALLOW_IDMAP`. This means:
+
+| Backend (`fs_driver`) | Lower filesystem | Idmapped overlay |
+| --- | --- | --- |
+| `fscache` | EROFS (Linux 6.5+) | supported |
+| `blockdev` (tarfs) | ext4 on loop device | supported |
+| `fusedev` (rafs) | FUSE | **not supported** |
+| plain OCI (no nydus layer) | overlay over ext4/xfs/btrfs | supported |
+
+`nydusd` does not advertise `FUSE_ALLOW_IDMAP`, so rafs over FUSE cannot be the
+lower of an idmapped overlay. The snapshotter detects this combination in
+`Prepare`/`Mounts` and fails fast with:
+
+```
+snapshot <id>: rafs fusedev backend does not support idmapped mounts; use fs_driver="fscache" (EROFS, Linux 6.5+) or a non-nydus image
+```
+
+Resolve it by switching the snapshotter to `fs_driver = "fscache"` (and packing
+images as rafs v6) or by using a plain OCI image for userns pods.
+
 Verify snapshotter plugin:
 
 ```bash
@@ -145,3 +168,7 @@ If this succeeds, commit artifact is usable through nydus snapshotter path.
    - verify `capabilities = ["remap-ids"]`.
 4. `input/output error` reading rootfs files on nydus-native image:
    - check nydusd backend type matches image storage backend (for example `registry` vs `s3`).
+5. Snapshotter returns `rafs fusedev backend does not support idmapped mounts`:
+   - the lower filesystem is rafs over FUSE, which the kernel cannot idmap. Switch to
+     `fs_driver = "fscache"` (EROFS, Linux 6.5+), use tarfs (`blockdev`), or run the
+     userns pod with a plain OCI image.

@@ -682,6 +682,16 @@ func (fs *Filesystem) MountPoint(snapshotID string) (string, error) {
 	return "", errdefs.ErrNotFound
 }
 
+// GetFsDriver returns the FS driver string (fusedev/fscache/blockdev/...) for the
+// rafs instance bound to snapshotID, or an empty string if no instance is registered.
+func (fs *Filesystem) GetFsDriver(snapshotID string) string {
+	rafs := racache.RafsGlobalCache.Get(snapshotID)
+	if rafs == nil {
+		return ""
+	}
+	return rafs.GetFsDriver()
+}
+
 func (fs *Filesystem) BootstrapFile(id string) (string, error) {
 	rafs := racache.RafsGlobalCache.Get(id)
 	if rafs == nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/core/snapshots/storage"
+	"github.com/containerd/nydus-snapshotter/config"
 	"github.com/containerd/nydus-snapshotter/pkg/label"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -604,4 +605,92 @@ func TestMountNativeConfigVolatile(t *testing.T) {
 		require.Len(t, mounts, 1)
 		assert.NotContains(t, mounts[0].Options, "volatile")
 	})
+}
+
+// TestCheckIDMapBackendCompat verifies the fast-fail guard: rafs over FUSE cannot be
+// idmapped by the kernel (no FUSE_ALLOW_IDMAP advertised by nydusd), so mountRemote
+// must reject idmap labels on a fusedev-backed snapshot instead of letting the runtime
+// hit an opaque mount_setattr EINVAL at container start.
+func TestCheckIDMapBackendCompat(t *testing.T) {
+	const (
+		snapshotID = "snap-meta"
+		uidMap     = "0:1000:65536"
+		gidMap     = "0:2000:65536"
+	)
+
+	tests := []struct {
+		name     string
+		fsDriver string
+		labels   map[string]string
+		wantErr  bool
+	}{
+		{
+			name:     "fusedev + uid mapping rejected",
+			fsDriver: config.FsDriverFusedev,
+			labels:   map[string]string{label.LabelSnapshotUIDMapping: uidMap},
+			wantErr:  true,
+		},
+		{
+			name:     "fusedev + gid mapping rejected",
+			fsDriver: config.FsDriverFusedev,
+			labels:   map[string]string{label.LabelSnapshotGIDMapping: gidMap},
+			wantErr:  true,
+		},
+		{
+			name:     "fusedev + both mappings rejected",
+			fsDriver: config.FsDriverFusedev,
+			labels: map[string]string{
+				label.LabelSnapshotUIDMapping: uidMap,
+				label.LabelSnapshotGIDMapping: gidMap,
+			},
+			wantErr: true,
+		},
+		{
+			name:     "fusedev without idmap labels accepted",
+			fsDriver: config.FsDriverFusedev,
+			labels:   map[string]string{},
+			wantErr:  false,
+		},
+		{
+			name:     "fscache with idmap labels accepted",
+			fsDriver: config.FsDriverFscache,
+			labels: map[string]string{
+				label.LabelSnapshotUIDMapping: uidMap,
+				label.LabelSnapshotGIDMapping: gidMap,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "blockdev (tarfs) with idmap labels accepted",
+			fsDriver: config.FsDriverBlockdev,
+			labels: map[string]string{
+				label.LabelSnapshotUIDMapping: uidMap,
+				label.LabelSnapshotGIDMapping: gidMap,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "empty driver (no rafs instance) accepted",
+			fsDriver: "",
+			labels: map[string]string{
+				label.LabelSnapshotUIDMapping: uidMap,
+				label.LabelSnapshotGIDMapping: gidMap,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkIDMapBackendCompat(tt.fsDriver, tt.labels, snapshotID)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), snapshotID)
+				assert.Contains(t, err.Error(), "fusedev")
+				assert.Contains(t, err.Error(), config.FsDriverFscache)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

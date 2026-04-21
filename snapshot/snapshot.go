@@ -1188,6 +1188,9 @@ func (o *snapshotter) mountRemote(ctx context.Context, labels map[string]string,
 	// uidmap=/gidmap= is only processed by the plain kernel overlay driver (Linux 5.19+);
 	// fuse.nydus-overlayfs and Kata paths do not support these options.
 	if o.idmapMountsSupported {
+		if err := checkIDMapBackendCompat(o.fs.GetFsDriver(id), labels, id); err != nil {
+			return nil, err
+		}
 		if v, ok := labels[label.LabelSnapshotUIDMapping]; ok {
 			overlayOptions = append([]string{fmt.Sprintf("uidmap=%s", v)}, overlayOptions...)
 		}
@@ -1196,6 +1199,27 @@ func (o *snapshotter) mountRemote(ctx context.Context, labels map[string]string,
 		}
 	}
 	return overlayMount(overlayOptions), nil
+}
+
+// checkIDMapBackendCompat rejects idmapped overlay mounts whose lower layer is served by
+// a backend the kernel cannot idmap. The kernel's idmapped-overlay gate requires every
+// lowerdir to live on a filesystem that sets FS_ALLOW_IDMAP; rafs over FUSE does not
+// advertise FUSE_ALLOW_IDMAP, so mount_setattr(MOUNT_ATTR_IDMAP) would return EINVAL and
+// the container would fail to start with an opaque kernel error. Fail fast with an
+// actionable message instead. fsDriver may be empty when no rafs instance is registered
+// for id, in which case the check is skipped (the plain OCI path handles that).
+func checkIDMapBackendCompat(fsDriver string, labels map[string]string, id string) error {
+	_, hasUID := labels[label.LabelSnapshotUIDMapping]
+	_, hasGID := labels[label.LabelSnapshotGIDMapping]
+	if !hasUID && !hasGID {
+		return nil
+	}
+	if fsDriver == config.FsDriverFusedev {
+		return errors.Errorf(
+			"snapshot %s: rafs fusedev backend does not support idmapped mounts; use fs_driver=%q (EROFS, Linux 6.5+) or a non-nydus image",
+			id, config.FsDriverFscache)
+	}
+	return nil
 }
 
 func (o *snapshotter) mountNative(ctx context.Context, labels map[string]string, s storage.Snapshot) ([]mount.Mount, error) {
