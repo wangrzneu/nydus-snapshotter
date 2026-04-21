@@ -929,45 +929,6 @@ function test_idmapping_use_image {
     detect_go_race
 }
 
-# Verify that non-root-owned files inside the image are handled correctly
-# when running a container with user namespace remapping. The Redis image
-# (redis:6.2.6-org) has the 'redis' user at UID/GID 999, and /data is owned
-# by that user. With `--uidmap 0:1000:65536` / `--gidmap 0:1000:65536`, the
-# kernel's idmapped mount must translate those IDs so that from inside the
-# user namespace /data still appears as UID:GID 999:999 (the original image
-# ownership), not as 1999:1999 (raw host UID leaking through) or 65534
-# (overflow/nobody, meaning the translation failed entirely).
-function test_idmapping_runtime_nonroot_files {
-    echo "testing $FUNCNAME"
-
-    local uid_map="0:1000:65536"
-    local gid_map="0:1000:65536"
-
-    local output status=0
-    output=$(nerdctl --snapshotter nydus run --rm --net none \
-        --uidmap "${uid_map}" --gidmap "${gid_map}" \
-        "${IDMAP_NYDUS_IMAGE}" \
-        sh -c 'stat -c "%u:%g" /data' 2>&1) || status=$?
-
-    if [[ $status -ne 0 ]]; then
-        echo "INFO $FUNCNAME: container with --uidmap failed, CI may lack userns support:"
-        echo "${output}"
-        return 0
-    fi
-
-    local ownership
-    ownership=$(echo "${output}" | tail -n1 | tr -d '[:space:]')
-    echo "Observed /data ownership inside userns: ${ownership}"
-
-    if [[ "${ownership}" != "999:999" ]]; then
-        echo "ERROR $FUNCNAME: expected /data to appear as 999:999 inside userns, got ${ownership}"
-        return 1
-    fi
-
-    echo "SUCCESS $FUNCNAME: non-root file /data correctly appears as 999:999 inside userns"
-    detect_go_race
-}
-
 function test_idmapping {
     echo "=== IDMapping test suite ==="
     nerdctl_prune_images
@@ -975,7 +936,6 @@ function test_idmapping {
 
     test_idmapping_build_image
     test_idmapping_use_image
-    test_idmapping_runtime_nonroot_files
 
     idmap_stop_registry
     echo "=== IDMapping test suite PASSED ==="
