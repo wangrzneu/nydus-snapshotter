@@ -72,7 +72,14 @@ type NydusdClient interface {
 
 	GetFsMetrics(sid string) (*types.FsMetrics, error)
 	GetInflightMetrics() (*types.InflightMetrics, error)
-	GetCacheMetrics(sid string) (*types.CacheMetrics, error)
+	// GetFusedevCacheMetrics fetches blobcache metrics for a fusedev rafs
+	// instance. snapshotID is the raw ID used as the rafs mountpoint; "" asks
+	// for the default instance of a dedicated daemon.
+	GetFusedevCacheMetrics(snapshotID string) (*types.CacheMetrics, error)
+	// GetFscacheCacheMetrics fetches blobcache metrics for a fscache rafs
+	// instance. fscacheID is the sha256 digest used as the fscache key; "" asks
+	// for the default instance.
+	GetFscacheCacheMetrics(fscacheID string) (*types.CacheMetrics, error)
 
 	UpdateConfig(id string, params map[string]string) error
 
@@ -309,20 +316,37 @@ func (c *nydusdClient) GetInflightMetrics() (*types.InflightMetrics, error) {
 	return &m, nil
 }
 
-func (c *nydusdClient) GetCacheMetrics(sid string) (*types.CacheMetrics, error) {
-	query := query{}
-	if sid != "" {
-		query.Add("id", "/"+sid)
+// GetFusedevCacheMetrics queries /api/v1/metrics/blobcache for a fusedev rafs
+// instance. nydusd keys fusedev counters by the rafs mountpoint path, so the
+// snapshotID is passed as "/<snapshotID>". An empty snapshotID omits the id
+// parameter (default instance of a dedicated daemon).
+func (c *nydusdClient) GetFusedevCacheMetrics(snapshotID string) (*types.CacheMetrics, error) {
+	q := query{}
+	if snapshotID != "" {
+		q.Add("id", "/"+snapshotID)
 	}
+	return c.getCacheMetrics(q)
+}
 
-	url := c.url(endpointCacheMetrics, query)
+// GetFscacheCacheMetrics queries /api/v1/metrics/blobcache for a fscache rafs
+// instance. nydusd keys fscache counters by the raw fscache ID (a sha256
+// digest, no leading slash). An empty fscacheID omits the id parameter.
+func (c *nydusdClient) GetFscacheCacheMetrics(fscacheID string) (*types.CacheMetrics, error) {
+	q := query{}
+	if fscacheID != "" {
+		q.Add("id", fscacheID)
+	}
+	return c.getCacheMetrics(q)
+}
+
+func (c *nydusdClient) getCacheMetrics(q query) (*types.CacheMetrics, error) {
+	url := c.url(endpointCacheMetrics, q)
 	var m types.CacheMetrics
 	if err := c.request(http.MethodGet, url, nil, func(resp *http.Response) error {
 		return decode(resp, &m)
 	}); err != nil {
 		return nil, err
 	}
-
 	return &m, nil
 }
 

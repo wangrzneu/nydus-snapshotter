@@ -159,15 +159,7 @@ func (s *Server) CollectCacheMetrics(ctx context.Context) {
 			}
 
 			for _, i := range d.RafsCache.List() {
-				var sid string
-
-				if d.IsSharedDaemon() {
-					sid = i.SnapshotID
-				} else {
-					sid = ""
-				}
-
-				cacheMetrics, err := d.GetCacheMetrics(sid)
+				cacheMetrics, err := d.GetCacheMetrics(i)
 				if err != nil {
 					log.G(ctx).Errorf("failed to get cache metric: %v", err)
 					continue

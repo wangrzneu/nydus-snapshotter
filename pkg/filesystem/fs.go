@@ -41,7 +41,6 @@ import (
 	"github.com/containerd/nydus-snapshotter/pkg/signature"
 	"github.com/containerd/nydus-snapshotter/pkg/stargz"
 	"github.com/containerd/nydus-snapshotter/pkg/tarfs"
-	"github.com/containerd/nydus-snapshotter/pkg/utils/erofs"
 )
 
 type Filesystem struct {
@@ -268,26 +267,7 @@ func (fs *Filesystem) WaitUntilReady(snapshotID string) error {
 			return err
 		}
 
-		// For shared daemons, we need to use the correct cache ID to query metrics.
-		// For fscache, the cache is registered with fscacheID (a digest), not the raw snapshot ID.
-		// For fusedev, the cache is registered with the snapshot ID.
-		sid := ""
-		if d.IsSharedDaemon() {
-			if rafs.GetFsDriver() == config.FsDriverFscache {
-				// For fscache, use the fscache ID from annotations if available
-				if fscacheID, ok := rafs.Annotations[racache.AnnoFsCacheID]; ok && fscacheID != "" {
-					sid = fscacheID
-				} else {
-					// Fallback: compute fscacheID if not in annotations yet
-					sid = erofs.FscacheID(rafs.SnapshotID)
-				}
-			} else {
-				// For fusedev, use the snapshot ID directly
-				sid = rafs.SnapshotID
-			}
-		}
-
-		cacheMetrics, err := d.GetCacheMetrics(sid)
+		cacheMetrics, err := d.GetCacheMetrics(rafs)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get cache metric")
 		}

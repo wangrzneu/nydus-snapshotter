@@ -535,12 +535,27 @@ func (d *Daemon) UpdateAuthConfig(snapshotID string, kc *auth.PassKeyChain) erro
 	return client.UpdateConfig(apiID, map[string]string{"registry_auth": kc.ToBase64()})
 }
 
-func (d *Daemon) GetCacheMetrics(sid string) (*types.CacheMetrics, error) {
+// GetCacheMetrics fetches blobcache metrics for a rafs instance, picking the
+// nydusd counter key scheme that matches the fs driver: fusedev uses the rafs
+// mountpoint path, fscache uses the raw fscache ID. For a non-shared daemon
+// pass an empty rafs to query the default instance.
+func (d *Daemon) GetCacheMetrics(r *rafs.Rafs) (*types.CacheMetrics, error) {
 	c, err := d.GetClient()
 	if err != nil {
 		return nil, errors.Wrapf(err, "get cache metrics")
 	}
-	return c.GetCacheMetrics(sid)
+	if r == nil || !d.IsSharedDaemon() {
+		// Default/only instance: either driver's no-id query returns it.
+		return c.GetFusedevCacheMetrics("")
+	}
+	if r.GetFsDriver() == config.FsDriverFscache {
+		fscacheID := r.Annotations[rafs.AnnoFsCacheID]
+		if fscacheID == "" {
+			fscacheID = erofs.FscacheID(r.SnapshotID)
+		}
+		return c.GetFscacheCacheMetrics(fscacheID)
+	}
+	return c.GetFusedevCacheMetrics(r.SnapshotID)
 }
 
 func (d *Daemon) GetClient() (NydusdClient, error) {
