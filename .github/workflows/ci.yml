@@ -10,13 +10,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  security:
+    name: Security scan
+    timeout-minutes: 10
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+      - name: Setup Golang
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: "go.sum"
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: OSV-Scanner
+        run: |
+          go install github.com/google/osv-scanner/cmd/osv-scanner@v1
+          "$(go env GOPATH)/bin/osv-scanner" -r .
   build:
     name: Build and Lint
     timeout-minutes: 10
     runs-on: ubuntu-22.04
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
@@ -25,7 +45,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.1
+          # Prebuilt golangci-lint v2.1.x is built with Go 1.24; go.mod requires Go 1.25+.
+          install-mode: goinstall
+          version: v2.1.6
           skip-cache: true
       - name: Build
         run: |
@@ -37,7 +59,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
@@ -53,7 +75,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
@@ -82,7 +104,7 @@ jobs:
         GOARCH: ["amd64", "arm64"]
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
@@ -99,7 +121,7 @@ jobs:
     needs: [build]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
